@@ -1,0 +1,1 @@
+cmake -B build -S . "-DCMAKE_TOOLCHAIN_FILE=/home/cs144/vcpkg/scripts/buildsystems/vcpkg.cmake"
