@@ -38,13 +38,31 @@ void setnonblock(int fd)
   int new_opt = old_opt | O_NONBLOCK;
   fcntl(fd, F_SETFL, new_opt);
 }
-void addfd(int epollfd, int fd)
+void registerConnection(int epollfd, int fd)
 {
   epoll_event event;
-  event.events = EPOLLIN | EPOLLOUT;
+  event.events = EPOLLIN;
   event.data.fd = fd;
   setnonblock(fd);
   ChechError(epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event), "add fd to epoll failed");
+}
+
+
+void connectionHandler(int epollfd, int listenfd)
+{
+  struct sockaddr_in client_address;
+  socklen_t client_addrlength = sizeof(client_address);
+  int connfd = accept(listenfd, (struct sockaddr *)&client_address, &client_addrlength);
+  ChechError(connfd, "accept from socket failed");
+  registerConnection(epollfd, connfd);
+  std::cout << "Got connection from "<< ntohs(client_address.sin_port) << '\n';
+}
+void echoHandler(epoll_event* event, char *buf, size_t n)
+{
+  int r = recv(event->data.fd, buf,n, 0);
+  ChechError(r, "recv from socket failed");
+  int w = send(event->data.fd, buf, r, 0);
+  ChechError(w, "send to socket failed");
 }
 
 
@@ -56,7 +74,7 @@ int main(int argc, char ** argv)
   }
   int listenfd = Socket(argv[1], atoi(argv[2]));
   int epollfd = epoll_create(5);
-  addfd(epollfd, listenfd);
+  registerConnection(epollfd, listenfd);
 
   while(true)
   {
@@ -66,22 +84,14 @@ int main(int argc, char ** argv)
     char buf[BUFFER_SZIE];
     for(int i=0; i<ret; ++i)
     {
-      if(event[i].data.fd == listenfd)
+      if(event[i].data.fd == listenfd && (event[i].events & EPOLLIN))
       {
-        struct sockaddr_in client_address;
-        socklen_t client_addrlength = sizeof(client_address);
-        int connfd = accept(listenfd, (struct sockaddr *)&client_address, &client_addrlength);
-        ChechError(connfd, "accept from socket failed");
-        addfd(epollfd, connfd);
-        std::cout << "Got connection from "<< ntohs(client_address.sin_port) << '\n';
+        connectionHandler(epollfd, listenfd);
       }
-      else if((event[i].events & EPOLLIN) && (event[i].events & EPOLLOUT))
+      else if(event[i].events & EPOLLIN)
       {
         memset(buf, 0, BUFFER_SZIE);
-        int r = recv(event[i].data.fd, buf, BUFFER_SZIE - 1, 0);
-        ChechError(r, "recv from socket failed");
-        int w = send(event[i].data.fd, buf, r, 0);
-        ChechError(w, "send to socket failed");
+        echoHandler(&event[i], buf, BUFFER_SZIE-1);
       }
     }
   }
